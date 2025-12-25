@@ -1,8 +1,7 @@
 // ==UserScript==
 // @name         Torrent Mod Toolkit
-// @version      0.2
+// @version      0.3
 // @description  Common actions for torrent mods
-// @icon         https://raw.githubusercontent.com/xzin-CoRK/torrent-mod-toolkit/refs/heads/main/hammer.png
 // @author       xzin
 
 // @match        https://aither.cc/torrents/*
@@ -36,10 +35,14 @@
 // @license MIT
 // ==/UserScript==
 
+
+// CHANGELOG
+// 0.3 - Add DOM subscription model for pages with dynamic DOM; fixes Z-network file structure copy functionality for season packs
+
 (function () {
     "use strict";
 
-    const version = "0.2";
+    const version = "0.3";
 
     var release_name;
     var mediainfo;
@@ -48,6 +51,7 @@
     var imdbId;
     var home_tracker_link;
     var isHidden = false;
+    var activeTemplate;
 
     const ATH_SEARCH_URL = "https://aither.cc/torrents?imdbId=";
     const AVISTAZ_SEARCH_URL = "https://avistaz.to/movies?search=&imdb=";
@@ -225,6 +229,33 @@
         return match ? match[1].trim() : null;
     }
 
+     /* ---------------------------------------------------------------------
+     * SELECT TEMPLATE BASED ON URL, THEN LOAD DATA
+     * ---------------------------------------------------------------------
+     */
+
+    function scrapeSite() {
+        const currentURL = window.location.href;
+        activeTemplate = siteTemplates.find((m) => m.matches(currentURL)) || null;
+
+        if(activeTemplate) {
+            mediainfo = activeTemplate.extractMediainfo();
+            uniqueId = extractUniqueId(mediainfo);
+            file_structure = activeTemplate.extractFileStructure();
+
+            // Get info for home tracker link
+            imdbId = activeTemplate.extractIMDB();
+
+            const release_group = activeTemplate.extractReleaseGroup();
+
+            if(imdbId && release_group) {
+                if(homeTrackerSearchUrlMap[release_group]) {
+                    home_tracker_link = homeTrackerSearchUrlMap[release_group] ? homeTrackerSearchUrlMap[release_group] + imdbId : null;
+                }
+            }
+        }
+    }
+
 
     /*
     * Inserts the toolkit into the DOM
@@ -338,6 +369,7 @@
      *  - extractFileStructure() : string|null — copy the torrent page's file list
      *  - extractIMDB() : string|null — finds the imdb id
      *  - extractReleaseGroup() : string|null — finds the release group, if present
+     *  - getDOMHook(): string|null — returns the element that needs DOM observer, if needed
      */
 
     const siteTemplates = [
@@ -369,7 +401,8 @@
                 release_name = title.innerText;
                 const match = title.innerText.match(/-([A-Za-z0-9]+)$/);
                 return match ? match[1] : null;
-            }
+            },
+            getDOMHook: () => { return null; }
         },
 
         {
@@ -405,7 +438,8 @@
                 release_name = title.innerText;
                 const match = title.innerText.match(/-([A-Za-z0-9]+)(\.mkv|\.mp4)?$/);
                 return match ? match[1] : null;
-            }
+            },
+            getDOMHook: () => { return null; }
         },
 
         {
@@ -460,7 +494,8 @@
                 release_name = title.innerText;
                 const match = title.innerText.match(/-([A-Za-z0-9]+)$/);
                 return match ? match[1] : null;
-            }
+            },
+            getDOMHook: () => {return null;}
         },
 
         {
@@ -471,7 +506,7 @@
                 return el ? el.textContent.trim() : null;
             },
             extractFileStructure: () => {
-                const files = document.querySelectorAll("div#file_list_tree a span.file-name");
+                const files = document.querySelectorAll("div#file_list_tree span.file-name");
                 if(!files) return null;
 
                 return Array.from(files)
@@ -492,6 +527,9 @@
                 release_name = title.innerText;
                 const match = title.innerText.match(/-([A-Za-z0-9]+)$/);
                 return match ? match[1] : null;
+            },
+            getDOMHook: () => {
+                return document.querySelector('div#file_list_tree');
             }
         },
 
@@ -550,7 +588,8 @@
                 release_name = title.innerText;
                 const match = title.innerText.match(/-([A-Za-z0-9]+)$/);
                 return match ? match[1] : null;
-            }
+            },
+            getDOMHook: () => {return null;}
         },
 
          {
@@ -592,7 +631,8 @@
                 release_name = title.value;
                 const match = release_name.match(/-([A-Za-z0-9]+)(\.mkv|\.mp4)?$/);
                 return match ? match[1] : null;
-            }
+            },
+            getDOMHook: () => {return null;}
         },
 
         {
@@ -615,35 +655,11 @@
             },
             extractReleaseGroup: () => {
 
-            }
+            },
+            getDOMHook: () => {return null;}
         }
 
     ];
-
-    /* ---------------------------------------------------------------------
-     * SELECT TEMPLATE BASED ON URL, THEN LOAD DATA
-     * ---------------------------------------------------------------------
-     */
-
-    const currentURL = window.location.href;
-    const activeTemplate = siteTemplates.find((m) => m.matches(currentURL)) || null;
-
-    if(activeTemplate) {
-        mediainfo = activeTemplate.extractMediainfo();
-        uniqueId = extractUniqueId(mediainfo);
-        file_structure = activeTemplate.extractFileStructure();
-
-        // Get info for home tracker link
-        imdbId = activeTemplate.extractIMDB();
-
-        const release_group = activeTemplate.extractReleaseGroup();
-
-       if(imdbId && release_group) {
-            if(homeTrackerSearchUrlMap[release_group]) {
-                home_tracker_link = homeTrackerSearchUrlMap[release_group] ? homeTrackerSearchUrlMap[release_group] + imdbId : null;
-            }
-        }
-    }
 
 
     /* ---------------------------------------------------------------------
@@ -750,8 +766,28 @@
         }
     `);
 
+
     setupToast();
+    scrapeSite();
     renderToolkit();
+
+
+    // If the site has DOM changes that require an observer, we'll initialize that here
+    const DOMHook = activeTemplate.getDOMHook();
+    if (DOMHook) {
+        // Create an observer to watch for DOM changes
+        const observer = new MutationObserver((mutationList, observer) => {
+            for (const mutation of mutationList) {
+                if (mutation.type === "childList") {
+                    scrapeSite();
+                    renderToolkit();
+                }
+            }
+        });
+
+        // Attach the observer to the page
+        observer.observe(DOMHook, { attributes: false, childList: true, subtree: true });
+    }
 
 
 })();
