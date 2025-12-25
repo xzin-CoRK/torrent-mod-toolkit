@@ -3,6 +3,7 @@
 // @version      0.2
 // @description  Common actions for torrent mods
 // @author       xzin
+
 // @match        https://aither.cc/torrents/*
 // @exclude      https://aither.cc/torrents/similar/*
 // @exclude      https://aither.cc/torrents/moderation
@@ -23,9 +24,14 @@
 // @match        https://privatehd.to/torrent/*
 // @match        https://filelist.io/details.php?id=*
 // @match        https://anthelion.me/torrents.php?id=*&torrentid=*
+
 // @grant        GM_setClipboard
 // @grant        GM_addStyle
 // @grant        GM_xmlhttpRequest
+
+// @downloadURL https://openuserjs.org/install/xzin/Torrent_Mod_Toolkit.user.js
+// @updateURL https://openuserjs.org/meta/xzin/Torrent_Mod_Toolkit.meta.js
+
 // @license MIT
 // ==/UserScript==
 
