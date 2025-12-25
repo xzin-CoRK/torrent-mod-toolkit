@@ -2,6 +2,7 @@
 // @name         Torrent Mod Toolkit
 // @version      0.2
 // @description  Common actions for torrent mods
+// @icon         https://raw.githubusercontent.com/xzin-CoRK/torrent-mod-toolkit/refs/heads/main/hammer.png
 // @author       xzin
 
 // @match        https://aither.cc/torrents/*
