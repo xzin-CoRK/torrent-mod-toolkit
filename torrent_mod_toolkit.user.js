@@ -639,11 +639,11 @@
             name: "MTV Template",
             matches: (url) => url.includes("morethantv.me"),
             extractMediainfo: () => {
-                const el = document.querySelector("div.body div.mediainfo");
+                const el = document.querySelector("tbody#torrent_list > tr:not(.hidden) div.body div.mediainfo");
                 return el ? el.textContent.trim() : null;
             },
             extractFileStructure: () => {
-                const files = document.querySelectorAll('div#content div.body div.hidden tr td:first-child');
+                const files = document.querySelectorAll('tbody#torrent_list > tr:not(.hidden) div#descbox div[id^="files_"] tr:not(.rowa, .smallhead) td:first-child');
                 if(!files) return null;
 
                 return Array.from(files)
@@ -656,7 +656,9 @@
             extractReleaseGroup: () => {
 
             },
-            getDOMHook: () => {return null;}
+            getDOMHook: () => {
+                return document.querySelector('tbody#torrent_list');
+            }
         }
 
     ];
@@ -778,7 +780,7 @@
         // Create an observer to watch for DOM changes
         const observer = new MutationObserver((mutationList, observer) => {
             for (const mutation of mutationList) {
-                if (mutation.type === "childList") {
+                if (mutation.type === "childList" || (mutation.type === "attributes" && mutation.attributeName === "class")) {
                     scrapeSite();
                     renderToolkit();
                 }
@@ -786,7 +788,7 @@
         });
 
         // Attach the observer to the page
-        observer.observe(DOMHook, { attributes: false, childList: true, subtree: true });
+        observer.observe(DOMHook, { attributes: true, childList: true, subtree: true });
     }
 
 
