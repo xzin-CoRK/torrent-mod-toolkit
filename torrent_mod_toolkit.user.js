@@ -2,6 +2,7 @@
 // @name         Torrent Mod Toolkit
 // @version      0.3
 // @description  Common actions for torrent mods
+// @icon         https://raw.githubusercontent.com/xzin-CoRK/torrent-mod-toolkit/refs/heads/main/hammer.png
 // @author       xzin
 
 // @match        https://aither.cc/torrents/*
@@ -17,6 +18,7 @@
 // @exclude      https://upload.cx/torrents/similar/*
 // @exclude      https://upload.cx/torrents/moderation
 // @match        https://beyond-hd.me/torrents/*
+// @match        https://beyond-hd.me/library/title/*
 // @match        https://hdbits.org/details.php?id=*
 // @match        https://www.morethantv.me/torrents.php?id=*
 // @match        https://avistaz.to/torrent/*
@@ -38,17 +40,19 @@
 
 // CHANGELOG
 // 0.3 - Add DOM subscription model for pages with dynamic DOM; fixes Z-network file structure copy functionality for season packs
+// 0.4 - Update BHD, ANT, MTV to use dynamic DOM and eliminate need for using permalink
 
 (function () {
     "use strict";
 
-    const version = "0.3";
+    const version = "0.4";
 
     var release_name;
     var mediainfo;
     var uniqueId;
-    var file_structure;
+    let file_structure = undefined;
     var imdbId;
+    var release_group;
     var home_tracker_link;
     var isHidden = false;
     var activeTemplate;
@@ -241,12 +245,17 @@
         if(activeTemplate) {
             mediainfo = activeTemplate.extractMediainfo();
             uniqueId = extractUniqueId(mediainfo);
-            file_structure = activeTemplate.extractFileStructure();
+
+            let extractedFiles = activeTemplate.extractFileStructure();
+            if (file_structure === undefined || extractedFiles) {
+                file_structure = extractedFiles;
+            }
+
 
             // Get info for home tracker link
             imdbId = activeTemplate.extractIMDB();
 
-            const release_group = activeTemplate.extractReleaseGroup();
+            release_group = activeTemplate.extractReleaseGroup();
 
             if(imdbId && release_group) {
                 if(homeTrackerSearchUrlMap[release_group]) {
@@ -409,20 +418,29 @@
             name: "BHD Template",
             matches: (url) => url.includes("beyond-hd.me"),
             extractMediainfo: () => {
-                const inline_view = document.querySelector("div.table-torrents tr.libraryinline pre.decoda-code code");
+                const inline_view = document.querySelector("div.table-torrents tr[id^='commenthidden'][style*='display: table-row'] pre.decoda-code code");
                 const torrent_page_view = document.querySelector("div#stats-full pre.decoda-code div");
 
                 return inline_view ? inline_view.innerText.trim() : torrent_page_view ? torrent_page_view.innerText.trim() : null;
             },
             extractFileStructure: () => {
-                const match = window.location.href.match(/torrents\/[^.]+\.(\d+)$/);
-                if(!match) return null;
-                let torrentId = match[1].trim();
-                let files = document.querySelectorAll('#modal_torrent_files' + torrentId + ' table tr td:nth-child(2)')
+                // Need to find the Files button to locate the proper modal
+                let fileButtons = document.querySelectorAll("div.table-torrents tr[id^='commenthidden'][style*='display: table-row'] a.bhd-toolx-button");
+                let filesButton = [...fileButtons].find(btn => btn.textContent.trim() === "Files");
+
+                if(!filesButton) return null;
+
+                // Now that we have the modal we can extract the file list
+                let modalId = filesButton.getAttribute("data-target");
+                let files = document.querySelectorAll(`div${modalId} table tr > td:nth-child(2)`);
+
+                console.log(filesButton, filesButton?.dataset?.target);
+
                 if(!files) return null;
 
+
                 return Array.from(files)
-                    .map(file => file.innerText.trim())
+                    .map(file => file.textContent.trim())
                     .join("\n");
             },
             extractIMDB: () => {
@@ -439,7 +457,7 @@
                 const match = title.innerText.match(/-([A-Za-z0-9]+)(\.mkv|\.mp4)?$/);
                 return match ? match[1] : null;
             },
-            getDOMHook: () => { return null; }
+            getDOMHook: () => { return document.querySelector('div.table-torrents'); }
         },
 
         {
@@ -596,18 +614,12 @@
             name: "ANT Template",
             matches: (url) => url.includes("anthelion.me"),
             extractMediainfo: () => {
-                const urlParams = new URLSearchParams(window.location.search);
-                const torrentId = urlParams.get('torrentid');
-                if(!torrentId) return null;
+                const el = document.querySelector(`tr[id^="torrent_"]:not(.hidden) blockquote.mediainfoRaw`);
 
-                const el = document.querySelector(`tr#torrent_${torrentId} blockquote.mediainfoRaw`);
                 return el ? el.textContent.trim() : null;
             },
             extractFileStructure: () => {
-                const urlParams = new URLSearchParams(window.location.search);
-                const torrentId = urlParams.get('torrentid');
-                if(!torrentId) return null;
-                const files = document.querySelectorAll(`div#files_${torrentId} tr.row td:first-child`);
+                const files = document.querySelectorAll(`tr[id^="torrent_"]:not(.hidden) tr.row td:first-child`);
                 if(!files) return null;
 
                 return Array.from(files)
@@ -622,17 +634,16 @@
                 return match ? match[0] : null;
             },
             extractReleaseGroup: () => {
-                const urlParams = new URLSearchParams(window.location.search);
-                const torrentId = urlParams.get('torrentid');
-                if(!torrentId) return null;
-                const title = document.querySelector(`tr#torrent_${torrentId} div.spoilerContainer input.spoilerButton`);
+                const title = document.querySelector(`tr[id^="torrent_"]:not(.hidden) div.spoilerContainer input.spoilerButton`);
                 if(!title) return null;
 
                 release_name = title.value;
                 const match = release_name.match(/-([A-Za-z0-9]+)(\.mkv|\.mp4)?$/);
                 return match ? match[1] : null;
             },
-            getDOMHook: () => {return null;}
+            getDOMHook: () => {
+                return document.querySelector('table#torrent_details');
+            }
         },
 
         {
@@ -780,9 +791,11 @@
         // Create an observer to watch for DOM changes
         const observer = new MutationObserver((mutationList, observer) => {
             for (const mutation of mutationList) {
-                if (mutation.type === "childList" || (mutation.type === "attributes" && mutation.attributeName === "class")) {
-                    scrapeSite();
-                    renderToolkit();
+                if (mutation.type === "childList" || (mutation.type === "attributes" && (mutation.attributeName === "class" || mutation.attributeName === "style"))) {
+                    requestAnimationFrame(() => {
+                        scrapeSite();
+                        renderToolkit();
+                    });
                 }
             }
         });
