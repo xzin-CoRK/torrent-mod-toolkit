@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Torrent Mod Toolkit
-// @version      0.3
+// @version      0.6
 // @description  Common actions for torrent mods
 // @icon         https://raw.githubusercontent.com/xzin-CoRK/torrent-mod-toolkit/refs/heads/main/hammer.png
 // @author       xzin
@@ -14,6 +14,9 @@
 // @match        https://lst.gg/torrents/*
 // @exclude      https://lst.gg/torrents/similar/*
 // @exclude      https://lst.gg/torrents/moderation
+// @match        https://hawke.uno/torrents/*
+// @exclude      https://hawke.uno/torrents/similar/*
+// @exclude      https://hawke.uno/torrents/moderation
 // @match        https://upload.cx/torrents/*
 // @exclude      https://upload.cx/torrents/similar/*
 // @exclude      https://upload.cx/torrents/moderation
@@ -25,7 +28,9 @@
 // @match        https://cinemaz.to/torrent/*
 // @match        https://privatehd.to/torrent/*
 // @match        https://filelist.io/details.php?id=*
-// @match        https://anthelion.me/torrents.php?id=*&torrentid=*
+// @match        https://anthelion.me/torrents.php?*
+// @match        https://passthepopcorn.me/torrents.php?*
+// @match        https://omgwtfnzbs.org/details?id=*
 
 // @grant        GM_setClipboard
 // @grant        GM_addStyle
@@ -41,11 +46,13 @@
 // CHANGELOG
 // 0.3 - Add DOM subscription model for pages with dynamic DOM; fixes Z-network file structure copy functionality for season packs
 // 0.4 - Update BHD, ANT, MTV to use dynamic DOM and eliminate need for using permalink
+// 0.5 - Add PTP (thx Harco for help), revert BHD to use permalink
+// 0.6 - Fix ANT/PTP to work with search url; add OMG, HUNO
 
 (function () {
     "use strict";
 
-    const version = "0.4";
+    const version = "0.6";
 
     var release_name;
     var mediainfo;
@@ -166,6 +173,7 @@
         "coffee" : LST_SEARCH_URL,
         "L0ST" : LST_SEARCH_URL,
         "SQS" : LST_SEARCH_URL,
+        "Yuki" : LST_SEARCH_URL,
 
         // MTEAM
         "MTeam" : MTEAM_SEARCH_URL,
@@ -245,12 +253,7 @@
         if(activeTemplate) {
             mediainfo = activeTemplate.extractMediainfo();
             uniqueId = extractUniqueId(mediainfo);
-
-            let extractedFiles = activeTemplate.extractFileStructure();
-            if (file_structure === undefined || extractedFiles) {
-                file_structure = extractedFiles;
-            }
-
+            file_structure = activeTemplate.extractFileStructure();
 
             // Get info for home tracker link
             imdbId = activeTemplate.extractIMDB();
@@ -261,6 +264,10 @@
                 if(homeTrackerSearchUrlMap[release_group]) {
                     home_tracker_link = homeTrackerSearchUrlMap[release_group] ? homeTrackerSearchUrlMap[release_group] + imdbId : null;
                 }
+            } else if (release_group) {
+                home_tracker_link = homeTrackerSearchUrlMap[release_group] ? homeTrackerSearchUrlMap[release_group] : null;
+            } else {
+                home_tracker_link = null;
             }
         }
     }
@@ -415,32 +422,55 @@
         },
 
         {
+            name: "HUNO Template",
+            matches: (url) => url.includes("hawke.uno"),
+            extractMediainfo: () => {
+                const el = document.querySelector(".torrent-mediainfo-dump pre code");
+                return el ? el.innerText.trim() : null;
+            },
+            extractFileStructure: () => {
+                const files = document.querySelectorAll("div#myModal div.modal-body details span:nth-child(3)");
+                if(!files) return null;
+
+                return Array.from(files)
+                    .map(file => file.innerText.trim())
+                    .join("\n");
+            },
+            extractIMDB: () => {
+                const el = document.querySelector("div.movie-details a[title='IMDB']");
+                if(!el) return null;
+                const match = el.href.match(/tt\d{7,8}/)
+                return match ? match[0] : null;
+            },
+            extractReleaseGroup: () => {
+                const title = document.querySelector("div.torrent-format span.torrent-category");
+                if(!title) return null;
+
+                release_name = title.innerText;
+                const match = title.innerText.match(/ - ([A-Za-z0-9]+)\)$/);
+                return match ? match[1] : null;
+            },
+            getDOMHook: () => { return null; }
+        },
+
+         {
             name: "BHD Template",
             matches: (url) => url.includes("beyond-hd.me"),
             extractMediainfo: () => {
-                const inline_view = document.querySelector("div.table-torrents tr[id^='commenthidden'][style*='display: table-row'] pre.decoda-code code");
+                const inline_view = document.querySelector("div.table-torrents tr.libraryinline pre.decoda-code code");
                 const torrent_page_view = document.querySelector("div#stats-full pre.decoda-code div");
 
                 return inline_view ? inline_view.innerText.trim() : torrent_page_view ? torrent_page_view.innerText.trim() : null;
             },
             extractFileStructure: () => {
-                // Need to find the Files button to locate the proper modal
-                let fileButtons = document.querySelectorAll("div.table-torrents tr[id^='commenthidden'][style*='display: table-row'] a.bhd-toolx-button");
-                let filesButton = [...fileButtons].find(btn => btn.textContent.trim() === "Files");
-
-                if(!filesButton) return null;
-
-                // Now that we have the modal we can extract the file list
-                let modalId = filesButton.getAttribute("data-target");
-                let files = document.querySelectorAll(`div${modalId} table tr > td:nth-child(2)`);
-
-                console.log(filesButton, filesButton?.dataset?.target);
-
+                const match = window.location.href.match(/torrents\/[^.]+\.(\d+)$/);
+                if(!match) return null;
+                let torrentId = match[1].trim();
+                let files = document.querySelectorAll('#modal_torrent_files' + torrentId + ' table tr td:nth-child(2)')
                 if(!files) return null;
 
-
                 return Array.from(files)
-                    .map(file => file.textContent.trim())
+                    .map(file => file.innerText.trim())
                     .join("\n");
             },
             extractIMDB: () => {
@@ -457,7 +487,7 @@
                 const match = title.innerText.match(/-([A-Za-z0-9]+)(\.mkv|\.mp4)?$/);
                 return match ? match[1] : null;
             },
-            getDOMHook: () => { return document.querySelector('div.table-torrents'); }
+            getDOMHook: () => { return null; }
         },
 
         {
@@ -670,7 +700,74 @@
             getDOMHook: () => {
                 return document.querySelector('tbody#torrent_list');
             }
-        }
+        },
+
+        {
+            name: "PTP Template",
+            matches: (url) => url.includes("passthepopcorn.me"),
+            extractMediainfo: () => {
+                const el = document.querySelector(`tr[id^="torrent_"]:not(.hidden) table.mediainfo + blockquote.spoiler`);
+
+                return el ? el.textContent.trim() : null;
+            },
+            extractFileStructure: () => {
+                const files = document.querySelectorAll(`tr[id^="torrent_"]:not(.hidden) div[id^="files_"] tr td:first-child`);
+                if(!files) return null;
+
+                return Array.from(files)
+                    .map(file => file.innerText.trim())
+                    .join("\n");
+            },
+            extractIMDB: () => {
+                const links = [...document.querySelectorAll('a')];
+                const imdbLink = links.find(el => el.href.includes("imdb.com"));
+                if(!imdbLink) return null;
+                const match = imdbLink.href.match(/tt\d{7,8}/)
+                return match ? match[0] : null;
+            },
+            extractReleaseGroup: () => {
+                const title = document.querySelector(`tr[id^="torrent_"]:not(.hidden) di.movie-page__torrent__panel div.bbcode-table-guard > a`);
+                if(!title) return null;
+
+                release_name = title.value;
+                const match = release_name.match(/-([A-Za-z0-9]+)(\.mkv|\.mp4|\.avi)?$/);
+                return match ? match[1] : null;
+            },
+            getDOMHook: () => {
+                return document.querySelector('table#torrent-table');
+            }
+        },
+
+        {
+            name: "OMG Template",
+            matches: (url) => url.includes("omgwtfnzbs.org"),
+            extractMediainfo: () => {
+                const el = document.querySelector(`table#descr113 pre`);
+
+                return el ? el.textContent.trim() : null;
+            },
+            extractFileStructure: () => {
+                return null;
+            },
+            extractIMDB: () => {
+                const links = [...document.querySelectorAll('a')];
+                const imdbLink = links.find(el => el.href.includes("imdb.com"));
+                if(!imdbLink) return null;
+                const match = imdbLink.href.match(/tt\d{7,8}/)
+                return match ? match[0] : null;
+            },
+            extractReleaseGroup: () => {
+                const title = document.querySelector(`div.window_header span.fls`);
+                if(!title) return null;
+
+                release_name = title.innerText;
+                const match = release_name.match(/-([A-Za-z0-9]+)(\.mkv|\.mp4)?$/);
+                return match ? match[1] : null;
+            },
+            getDOMHook: () => {
+                return null;
+            }
+        },
 
     ];
 
